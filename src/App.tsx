@@ -1,43 +1,119 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
 type Address = {
   id: number;
-  label: string;
+  alias: string;
   address: string;
-  balance: string;
+  balance_zatoshis: number;
 };
 
-const initialAddresses: Address[] = [
-  {
-    id: 1,
-    label: "Main Address",
-    address: "No address generated yet",
-    balance: "0.00000000",
-  },
-];
+type View = "wallet" | "send" | "receive";
 
 function App() {
-  const [addresses, setAddresses] = useState<Address[]>(initialAddresses);
-  const [activeAddressId, setActiveAddressId] = useState(1);
-  const [view, setView] = useState<"wallet" | "send" | "receive">("wallet");
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [activeAddressId, setActiveAddressId] = useState<number | null>(null);
+  const [view, setView] = useState<View>("wallet");
+
+  const [balance, setBalance] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [creatingAddress, setCreatingAddress] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const activeAddress =
     addresses.find((item) => item.id === activeAddressId) ??
-    addresses[0];
+    addresses[0] ??
+    null;
 
-  function createAddress() {
-    const id = addresses.length + 1;
+  useEffect(() => {
+    initializeWallet();
+  }, []);
 
-    const address: Address = {
-      id,
-      label: `Address ${id}`,
-      address: "No address generated yet",
-      balance: "0.00000000",
-    };
+  async function initializeWallet() {
+    try {
+      setLoading(true);
+      setError(null);
 
-    setAddresses((current) => [...current, address]);
-    setActiveAddressId(id);
+      await invoke<string>("create_wallet_test");
+
+      await refreshWallet();
+    } catch (err) {
+      console.error("Failed to initialize wallet:", err);
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshWallet() {
+    const [walletAddresses, totalBalance] = await Promise.all([
+      invoke<Address[]>("get_addresses"),
+      invoke<number>("get_total_balance"),
+    ]);
+
+    setAddresses(walletAddresses);
+    setBalance(totalBalance);
+
+    if (walletAddresses.length > 0) {
+      setActiveAddressId((current) =>
+        current !== null &&
+        walletAddresses.some((address) => address.id === current)
+          ? current
+          : walletAddresses[0].id,
+      );
+    }
+  }
+
+  async function createAddress() {
+    const alias = window.prompt(
+      "Give this address a name:",
+      `Address ${addresses.length + 1}`,
+    );
+
+    if (alias === null) {
+      return;
+    }
+
+    const cleanAlias = alias.trim();
+
+    if (!cleanAlias) {
+      setError("Address alias cannot be empty.");
+      return;
+    }
+
+    try {
+      setCreatingAddress(true);
+      setError(null);
+
+      const newAddress = await invoke<Address>("create_address", {
+        alias: cleanAlias,
+      });
+
+      setAddresses((current) => [...current, newAddress]);
+      setActiveAddressId(newAddress.id);
+    } catch (err) {
+      console.error("Failed to create address:", err);
+      setError(String(err));
+    } finally {
+      setCreatingAddress(false);
+    }
+  }
+
+  function formatZec(zatoshis: number) {
+    return (zatoshis / 100_000_000).toFixed(8);
+  }
+
+  async function copyAddress() {
+    if (!activeAddress) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(activeAddress.address);
+    } catch (err) {
+      console.error("Failed to copy address:", err);
+    }
   }
 
   return (
@@ -86,9 +162,10 @@ function App() {
 
           <div className="network-status">
             <span className="status-dot" />
+
             <div>
               <strong>Mainnet</strong>
-              <small>Connected</small>
+              <small>Wallet engine ready</small>
             </div>
           </div>
         </div>
@@ -98,6 +175,7 @@ function App() {
         <header className="header">
           <div>
             <div className="section-label">SHIELDED WALLET</div>
+
             <h1>
               {view === "wallet"
                 ? "Your Wallet"
@@ -114,6 +192,22 @@ function App() {
           </div>
         </header>
 
+        {error && (
+          <div
+            style={{
+              marginBottom: "18px",
+              padding: "12px 14px",
+              borderRadius: "10px",
+              background: "#fff1f1",
+              color: "#b42318",
+              fontSize: "12px",
+              border: "1px solid #f3cccc",
+            }}
+          >
+            {error}
+          </div>
+        )}
+
         {view === "wallet" && (
           <>
             <section className="balance-card">
@@ -121,12 +215,16 @@ function App() {
                 <div className="section-label">TOTAL BALANCE</div>
 
                 <div className="balance">
-                  0.00000000
+                  {formatZec(balance)}
                   <span>ZEC</span>
                 </div>
 
                 <div className="active-address">
-                  {activeAddress.address}
+                  {loading
+                    ? "Loading wallet..."
+                    : activeAddress
+                      ? activeAddress.address
+                      : "No address generated"}
                 </div>
               </div>
 
@@ -158,32 +256,55 @@ function App() {
                   <button
                     className="button small"
                     onClick={createAddress}
+                    disabled={creatingAddress}
                   >
-                    + New Address
+                    {creatingAddress ? "Creating..." : "+ New Address"}
                   </button>
                 </div>
 
                 <div className="addresses">
-                  {addresses.map((item) => (
-                    <button
-                      key={item.id}
-                      className={`address ${item.id === activeAddressId ? "selected" : ""}`}
-                      onClick={() => setActiveAddressId(item.id)}
-                    >
-                      <div className="address-number">
-                        {item.id}
-                      </div>
+                  {loading && (
+                    <div className="empty">
+                      <div className="empty-symbol">◌</div>
+                      <h3>Loading wallet</h3>
+                      <p>Preparing your shielded addresses.</p>
+                    </div>
+                  )}
 
-                      <div className="address-details">
-                        <strong>{item.label}</strong>
-                        <span>{item.address}</span>
-                      </div>
+                  {!loading && addresses.length === 0 && (
+                    <div className="empty">
+                      <div className="empty-symbol">Z</div>
+                      <h3>No addresses yet</h3>
+                      <p>
+                        Create your first shielded address to start using the
+                        wallet.
+                      </p>
+                    </div>
+                  )}
 
-                      <div className="address-balance">
-                        {item.balance} ZEC
-                      </div>
-                    </button>
-                  ))}
+                  {!loading &&
+                    addresses.map((item) => (
+                      <button
+                        key={item.id}
+                        className={`address ${
+                          item.id === activeAddress?.id ? "selected" : ""
+                        }`}
+                        onClick={() => setActiveAddressId(item.id)}
+                      >
+                        <div className="address-number">
+                          {item.id + 1}
+                        </div>
+
+                        <div className="address-details">
+                          <strong>{item.alias}</strong>
+                          <span>{item.address}</span>
+                        </div>
+
+                        <div className="address-balance">
+                          {formatZec(item.balance_zatoshis)} ZEC
+                        </div>
+                      </button>
+                    ))}
                 </div>
               </section>
 
@@ -201,8 +322,8 @@ function App() {
                   <h3>No transactions yet</h3>
 
                   <p>
-                    Transactions received or sent from this
-                    address will appear here.
+                    Transactions received or sent from your wallet will appear
+                    here.
                   </p>
                 </div>
               </section>
@@ -216,7 +337,9 @@ function App() {
               <div className="form-icon">↑</div>
 
               <div>
-                <div className="section-label">SHIELDED TRANSACTION</div>
+                <div className="section-label">
+                  SHIELDED TRANSACTION
+                </div>
                 <h2>Send ZEC</h2>
               </div>
             </div>
@@ -232,7 +355,12 @@ function App() {
             <label>
               Amount
               <div className="amount-input">
-                <input placeholder="0.00000000" type="number" />
+                <input
+                  placeholder="0.00000000"
+                  type="number"
+                  min="0"
+                  step="0.00000001"
+                />
                 <span>ZEC</span>
               </div>
             </label>
@@ -244,7 +372,7 @@ function App() {
 
             <div className="available">
               Available balance
-              <strong>0.00000000 ZEC</strong>
+              <strong>{formatZec(balance)} ZEC</strong>
             </div>
 
             <button className="button primary full">
@@ -264,20 +392,28 @@ function App() {
               </div>
             </div>
 
-            <div className="qr-placeholder">
-              QR
-            </div>
+            <div className="qr-placeholder">QR</div>
 
             <div className="receive-address">
-              <span>Your receiving address</span>
+              <span>
+                {activeAddress
+                  ? `${activeAddress.alias} — receiving address`
+                  : "Your receiving address"}
+              </span>
 
               <strong>
-                {activeAddress.address}
+                {activeAddress
+                  ? activeAddress.address
+                  : "No address available"}
               </strong>
             </div>
 
             <div className="receive-actions">
-              <button className="button primary">
+              <button
+                className="button primary"
+                onClick={copyAddress}
+                disabled={!activeAddress}
+              >
                 Copy Address
               </button>
 
@@ -287,8 +423,8 @@ function App() {
             </div>
 
             <p className="privacy-note">
-              Your shielded address can be shared with anyone
-              who needs to send you ZEC.
+              Your shielded address can be shared with anyone who needs to
+              send you ZEC.
             </p>
           </section>
         )}

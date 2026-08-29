@@ -1,20 +1,106 @@
 mod wallet;
 
-use wallet::WalletCore;
+use std::sync::Mutex;
+
+use tauri::State;
+use wallet::core::{WalletAddress, WalletCore};
+
+struct AppState {
+    wallet: Mutex<Option<WalletCore>>,
+}
 
 #[tauri::command]
-fn create_wallet_test() -> Result<String, String> {
-    let wallet = WalletCore::generate()?;
+fn create_wallet_test(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let mut wallet = state
+        .wallet
+        .lock()
+        .map_err(|_| "Wallet state lock poisoned".to_string())?;
 
-    wallet.default_address()
+    if wallet.is_none() {
+        *wallet = Some(WalletCore::generate()?);
+    }
+
+    let address = wallet
+        .as_mut()
+        .ok_or_else(|| "Wallet was not initialized".to_string())?
+        .ensure_default_address()?;
+
+    Ok(address.address)
+}
+
+#[tauri::command]
+fn get_addresses(
+    state: State<'_, AppState>,
+) -> Result<Vec<WalletAddress>, String> {
+    let mut wallet = state
+        .wallet
+        .lock()
+        .map_err(|_| "Wallet state lock poisoned".to_string())?;
+
+    if wallet.is_none() {
+        *wallet = Some(WalletCore::generate()?);
+    }
+
+    Ok(wallet
+        .as_ref()
+        .ok_or_else(|| "Wallet was not initialized".to_string())?
+        .addresses()
+        .to_vec())
+}
+
+#[tauri::command]
+fn create_address(
+    state: State<'_, AppState>,
+    alias: String,
+) -> Result<WalletAddress, String> {
+    let mut wallet = state
+        .wallet
+        .lock()
+        .map_err(|_| "Wallet state lock poisoned".to_string())?;
+
+    if wallet.is_none() {
+        *wallet = Some(WalletCore::generate()?);
+    }
+
+    wallet
+        .as_mut()
+        .ok_or_else(|| "Wallet was not initialized".to_string())?
+        .create_address(alias)
+}
+
+#[tauri::command]
+fn get_total_balance(
+    state: State<'_, AppState>,
+) -> Result<u64, String> {
+    let mut wallet = state
+        .wallet
+        .lock()
+        .map_err(|_| "Wallet state lock poisoned".to_string())?;
+
+    if wallet.is_none() {
+        *wallet = Some(WalletCore::generate()?);
+    }
+
+    Ok(wallet
+        .as_ref()
+        .ok_or_else(|| "Wallet was not initialized".to_string())?
+        .total_balance_zatoshis())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(AppState {
+            wallet: Mutex::new(None),
+        })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            create_wallet_test
+            create_wallet_test,
+            get_addresses,
+            create_address,
+            get_total_balance
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
