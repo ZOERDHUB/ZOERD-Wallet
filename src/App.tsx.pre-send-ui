@@ -36,12 +36,6 @@ function App() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const [sendRecipient, setSendRecipient] = useState("");
-  const [sendAmount, setSendAmount] = useState("");
-  const [sendTxids, setSendTxids] = useState<string[]>([]);
-  const [secureSecretAvailable, setSecureSecretAvailable] =
-    useState<boolean | null>(null);
-
   async function refreshWallet() {
     try {
       const address = await invoke<string>("open_wallet");
@@ -80,10 +74,6 @@ function App() {
   useEffect(() => {
     refreshWallet();
     checkNode();
-
-    invoke<boolean>("secure_secret_available")
-      .then(setSecureSecretAvailable)
-      .catch(() => setSecureSecretAvailable(false));
   }, []);
 
   async function createWallet() {
@@ -172,64 +162,6 @@ function App() {
     }
   }
 
-  async function sendZec() {
-    const recipient = sendRecipient.trim();
-    const amount = Number(sendAmount);
-
-    if (!recipient) {
-      setMessage("Enter a recipient Zcash address.");
-      return;
-    }
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setMessage("Enter a valid ZEC amount greater than zero.");
-      return;
-    }
-
-    if (
-      status?.chain_height == null ||
-      status?.fully_scanned_height == null ||
-      status.fully_scanned_height < status.chain_height
-    ) {
-      setMessage(
-        "Wallet synchronization must complete before sending ZEC."
-      );
-      return;
-    }
-
-    setBusy(true);
-    setMessage("");
-    setSendTxids([]);
-
-    try {
-      const txids = await invoke<string[]>("send_zec", {
-        recipientAddress: recipient,
-        amountZec: amount,
-      });
-
-      setSendTxids(txids);
-      setSendRecipient("");
-      setSendAmount("");
-
-      await refreshWallet();
-
-      setMessage(
-        txids.length === 1
-          ? "Transaction broadcast successfully."
-          : `${txids.length} transactions broadcast successfully.`
-      );
-    } catch (error) {
-      setMessage(`Send failed: ${String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const walletFullyScanned =
-    status?.chain_height != null &&
-    status?.fully_scanned_height != null &&
-    status.fully_scanned_height >= status.chain_height;
-
   if (walletExists === null) {
     return (
       <main className="app">
@@ -281,16 +213,6 @@ function App() {
             earlier height, so historical transactions can be scanned.
           </p>
         </section>
-
-        {secureSecretAvailable !== null && (
-          <div className="message">
-            Secure recovery phrase stored:
-            {" "}
-            <strong>
-              {secureSecretAvailable ? "YES" : "NO"}
-            </strong>
-          </div>
-        )}
 
         {message && <div className="message">{message}</div>}
       </main>
@@ -356,77 +278,6 @@ function App() {
             {status ? zec(status.pending_zatoshis) : "0.00000000"} ZEC
           </strong>
         </article>
-      </section>
-
-      <section className="card">
-        <div className="sectionHeader">
-          <div>
-            <h2>Send</h2>
-            <p className="muted">
-              Send ZEC from Account 0
-            </p>
-          </div>
-        </div>
-
-        <div className="sendForm">
-          <label>
-            <span className="label">Recipient</span>
-
-            <input
-              type="text"
-              value={sendRecipient}
-              onChange={(e) =>
-                setSendRecipient(e.target.value)
-              }
-              placeholder="Unified or supported Zcash address"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </label>
-
-          <label>
-            <span className="label">Amount</span>
-
-            <div className="amountInput">
-              <input
-                type="number"
-                min="0"
-                step="0.00000001"
-                value={sendAmount}
-                onChange={(e) =>
-                  setSendAmount(e.target.value)
-                }
-                placeholder="0.00000000"
-              />
-
-              <span>ZEC</span>
-            </div>
-          </label>
-
-          <button
-            onClick={sendZec}
-            disabled={busy || !walletFullyScanned}
-          >
-            {busy ? "Processing..." : "Send ZEC"}
-          </button>
-        </div>
-
-        {!walletFullyScanned && (
-          <p className="warning">
-            Sending is locked until this wallet has fully
-            synchronized with the backing Zcash node.
-          </p>
-        )}
-
-        {sendTxids.length > 0 && (
-          <div className="sendResult">
-            <strong>Transaction ID</strong>
-
-            {sendTxids.map((txid) => (
-              <code key={txid}>{txid}</code>
-            ))}
-          </div>
-        )}
       </section>
 
       <section className="card">

@@ -157,13 +157,6 @@ pub fn reopen_wallet_first_address<P: AsRef<Path>>(
     path: P,
 ) -> Result<String, String> {
     let network = Network::MainNetwork;
-    let path = path.as_ref();
-
-    if !path.exists() {
-        return Err(
-            "No wallet exists on this device.".to_string()
-        );
-    }
 
     let db = WalletDb::for_path(
         path,

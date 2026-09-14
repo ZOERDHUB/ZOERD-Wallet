@@ -1,0 +1,95 @@
+use bip39::{
+    Language,
+    Mnemonic,
+};
+
+use zcash_address::ZcashAddress;
+use zcash_keys::keys::UnifiedSpendingKey;
+use zcash_protocol::{
+    consensus::Network,
+    value::Zatoshis,
+};
+
+use zip321::{
+    Payment,
+    TransactionRequest,
+};
+
+pub fn spending_key_from_recovery_phrase(
+    recovery_phrase: &str,
+) -> Result<UnifiedSpendingKey, String> {
+    let mnemonic = Mnemonic::parse_in(
+        Language::English,
+        recovery_phrase.trim(),
+    )
+    .map_err(|e| {
+        format!("Invalid wallet recovery phrase: {e}")
+    })?;
+
+    let seed = mnemonic.to_seed("");
+
+    UnifiedSpendingKey::from_seed(
+        &Network::MainNetwork,
+        &seed,
+        zip32::AccountId::ZERO,
+    )
+    .map_err(|e| {
+        format!(
+            "Failed to derive Account 0 spending key: {e:?}"
+        )
+    })
+}
+
+pub fn zatoshis_from_zec(
+    amount_zec: f64,
+) -> Result<Zatoshis, String> {
+    if !amount_zec.is_finite() {
+        return Err(
+            "Amount must be a finite number.".to_string(),
+        );
+    }
+
+    if amount_zec <= 0.0 {
+        return Err(
+            "Amount must be greater than zero.".to_string(),
+        );
+    }
+
+    const ZATOSHIS_PER_ZEC: f64 = 100_000_000.0;
+
+    let raw = amount_zec * ZATOSHIS_PER_ZEC;
+
+    if raw.fract() != 0.0 {
+        return Err(
+            "Amount cannot contain more than 8 decimal places."
+                .to_string(),
+        );
+    }
+
+    if raw > u64::MAX as f64 {
+        return Err(
+            "Amount is too large.".to_string(),
+        );
+    }
+
+    Zatoshis::from_u64(raw as u64)
+        .map_err(|_| {
+            "Amount is outside the valid Zcash monetary range."
+                .to_string()
+        })
+}
+
+pub fn transaction_request(
+    recipient: ZcashAddress,
+    amount: Zatoshis,
+) -> Result<TransactionRequest, String> {
+    let payment =
+        Payment::without_memo(recipient, amount);
+
+    TransactionRequest::new(vec![payment])
+        .map_err(|e| {
+            format!(
+                "Failed to construct payment request: {e}"
+            )
+        })
+}

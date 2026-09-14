@@ -282,35 +282,6 @@ fn create_address(
     create_next_address(&state.wallet_db_path)
 }
 
-#[tauri::command]
-async fn send_zec(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    recipient_address: String,
-    amount_zec: f64,
-) -> Result<Vec<String>, String> {
-    let path = state.wallet_db_path.clone();
-    let endpoint = state.lightwalletd_endpoint.clone();
-
-    if !path.exists() {
-        return Err(
-            "No wallet exists yet.".to_string()
-        );
-    }
-
-    let recovery_phrase =
-        load_recovery_phrase(&app)?;
-
-    wallet::send::send_zec(
-        path,
-        &endpoint,
-        &recovery_phrase,
-        &recipient_address,
-        amount_zec,
-    )
-    .await
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -366,7 +337,6 @@ pub fn run() {
                 wallet_status,
                 get_addresses,
                 create_address,
-                send_zec,
             ],
         )
         .run(
